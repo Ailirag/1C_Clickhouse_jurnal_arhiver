@@ -1,4 +1,5 @@
 import sys
+import re
 import os
 import requests
 import shutil
@@ -88,16 +89,21 @@ def archiving_v8logs(file_name):
         name_archive = f'{path_to_v8Logs}{os.sep}{archive_prefix}{file_name[:-4]}.zip'
         name_backup = f'{backup_path}{os.sep}{archive_prefix}{file_name[:-4]}.zip'
         with zipfile.ZipFile(name_archive, 'w') as myzip:
-            myzip.write(f'{path_to_v8Logs}{os.sep}{file_name[:-4]}.lgx', compress_type=zipfile.ZIP_DEFLATED,
+            myzip.write(f'{path_to_v8Logs}{os.sep}{file_name[:-4]}.lgx', arcname=f'{file_name[:-4]}.lgx', compress_type=zipfile.ZIP_DEFLATED,
                         compresslevel=7)
-            myzip.write(f'{path_to_v8Logs}{os.sep}{file_name}', compress_type=zipfile.ZIP_DEFLATED, compresslevel=7)
+            myzip.write(f'{path_to_v8Logs}{os.sep}{file_name}', arcname=file_name, compress_type=zipfile.ZIP_DEFLATED, compresslevel=7)
+
+        logging(f'Deleting {file_name} and {file_name[:-3]}lgx')
+        os.remove(f'{path_to_v8Logs}{os.sep}{file_name}')
+        os.remove(f'{path_to_v8Logs}{os.sep}{file_name[:-3]}lgx')
+
         logging(f'Try to move in repo: {backup_path}')
         shutil.move(name_archive, name_backup)
-        return True
+
+        logging('Success')
     except Exception as e:
         error_exc = str(type(e)) + str(e)
-        logging(f'Archiving failed with an error: {error_exc}')
-        return False
+        logging(f'Action failed with an error: {error_exc}')
 
 
 def start_mutations_on_clickhouse(date_border):
@@ -163,11 +169,7 @@ if __name__ == '__main__':
         if mas_delete:
             for file_name in mas_delete:
                 try:
-                    successfully = archiving_v8logs(file_name)
-                    if successfully:
-                        os.remove(f'{path_to_v8Logs}{os.sep}{file_name}')
-                        os.remove(f'{path_to_v8Logs}{os.sep}{file_name[:-3]}lgx')
-                        logging('Success')
+                    archiving_v8logs(file_name)
                 except Exception as e:
                     error_exc = str(type(e)) + str(e)
                     logging(f'Error archiving/deleting file [{file_name}]   :   {error_exc}')
