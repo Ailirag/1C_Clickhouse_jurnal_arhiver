@@ -9,7 +9,8 @@ from secure_settings import Settings
 
 settings = Settings(delete_after_filling=False).get_all()
 
-required = 'clickhouse_url,clickhouse_user,clickhouse_pwd,count_of_days_in_clickhouse,path_to_v8logs,backup_path,archive_prefix'.split(',')
+required = 'clickhouse_url,clickhouse_user,clickhouse_pwd,count_of_days_in_clickhouse,' \
+           'path_to_v8logs,backup_path,archive_prefix,database_name'.split(',')
 
 errors = list()
 for req in required:
@@ -18,12 +19,6 @@ for req in required:
 
 if errors:
     raise ValueError(f'Please fill following fields: {", ".join(errors)}')
-
-
-class Test(object):
-    def __init__(self):
-        self.status_code = 200
-        self.text = '20220330000000.lgp'
 
 
 class LOGS_TABLES:
