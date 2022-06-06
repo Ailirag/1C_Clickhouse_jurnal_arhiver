@@ -4,12 +4,20 @@ import os
 import requests
 import shutil
 from datetime import datetime, timedelta
-import configparser
 import zipfile
+from secure_settings import Settings
 
-current_path = os.getcwd()
-path_to_settings = f'{current_path}{os.sep}settings.ini'
-config_file = configparser.ConfigParser()
+settings = Settings(delete_after_filling=False).get_all()
+
+required = 'clickhouse_url,clickhouse_user,clickhouse_pwd,count_of_days_in_clickhouse,path_to_v8logs,backup_path,archive_prefix'.split(',')
+
+errors = list()
+for req in required:
+    if not req in settings or settings[req] == '':
+        errors.append(req)
+
+if errors:
+    raise ValueError(f'Please fill following fields: {", ".join(errors)}')
 
 
 class Test(object):
@@ -50,54 +58,22 @@ def date_serialization(file_name):
         return datetime(3999, 12, 31)
 
 
-if not os.path.exists(path_to_settings):
-    logging('settings.ini not find and will be created.')
-    config_file['DEFAULT']['clickhouse_url'] = ''
-    config_file['DEFAULT']['clickhouse_user'] = ''
-    config_file['DEFAULT']['clickhouse_pwd'] = ''
-    config_file['DEFAULT']['count_of_days_in_clickhouse'] = ''
-    config_file['DEFAULT']['path_to_v8Logs'] = ''
-    config_file['DEFAULT']['backup_path'] = ''
-    config_file['DEFAULT']['archive_prefix'] = ''
-
-    with open(path_to_settings, 'w', encoding='utf8') as configfile:
-        config_file.write(configfile)
-
-    logging('settings.ini created. Please fill it and restart program.')
-    sys.exit()
-else:
-    config_file.read(path_to_settings, encoding='utf8')
-    clickhouse_url = config_file['DEFAULT']['clickhouse_url']
-    clickhouse_user = config_file['DEFAULT']['clickhouse_user']
-    clickhouse_pwd = config_file['DEFAULT']['clickhouse_pwd']
-    count_of_days_in_clickhouse = config_file['DEFAULT']['count_of_days_in_clickhouse']
-    path_to_v8Logs = config_file['DEFAULT']['path_to_v8Logs']
-    backup_path = config_file['DEFAULT']['backup_path']
-    archive_prefix = config_file['DEFAULT']['archive_prefix']
-
-    if not clickhouse_url \
-            or not clickhouse_user \
-            or not path_to_v8Logs \
-            or not backup_path:
-        logging('All fields on settings.ini must be filled in. Please will it and restart program.')
-        sys.exit()
-
-
 def archiving_v8logs(file_name):
     try:
         logging(f'archiving date {file_name[:-4]}')
-        name_archive = f'{path_to_v8Logs}{os.sep}{archive_prefix}{file_name[:-4]}.zip'
-        name_backup = f'{backup_path}{os.sep}{archive_prefix}{file_name[:-4]}.zip'
+        name_archive = f'{settings.path_to_v8logs}{os.sep}{settings.archive_prefix}{file_name[:-4]}.zip'
+        name_backup = f'{settings.backup_path}{os.sep}{settings.archive_prefix}{file_name[:-4]}.zip'
         with zipfile.ZipFile(name_archive, 'w') as myzip:
-            myzip.write(f'{path_to_v8Logs}{os.sep}{file_name[:-4]}.lgx', arcname=f'{file_name[:-4]}.lgx', compress_type=zipfile.ZIP_DEFLATED,
+            myzip.write(f'{settings.path_to_v8logs}{os.sep}{file_name[:-4]}.lgx', arcname=f'{file_name[:-4]}.lgx', compress_type=zipfile.ZIP_DEFLATED,
                         compresslevel=7)
-            myzip.write(f'{path_to_v8Logs}{os.sep}{file_name}', arcname=file_name, compress_type=zipfile.ZIP_DEFLATED, compresslevel=7)
+            myzip.write(f'{settings.path_to_v8logs}{os.sep}{file_name}', arcname=file_name, compress_type=zipfile.ZIP_DEFLATED, compresslevel=7)
+            myzip.write(f'{settings.path_to_v8logs}{os.sep}1Cv8.lgf', arcname='1Cv8.lgf', compress_type=zipfile.ZIP_DEFLATED, compresslevel=7)
 
         logging(f'Deleting {file_name} and {file_name[:-3]}lgx')
-        os.remove(f'{path_to_v8Logs}{os.sep}{file_name}')
-        os.remove(f'{path_to_v8Logs}{os.sep}{file_name[:-3]}lgx')
+        os.remove(f'{settings.path_to_v8logs}{os.sep}{file_name}')
+        os.remove(f'{settings.path_to_v8logs}{os.sep}{file_name[:-3]}lgx')
 
-        logging(f'Try to move in repo: {backup_path}')
+        logging(f'Try to move in repo: {settings.backup_path}')
         shutil.move(name_archive, name_backup)
 
         logging('Success')
@@ -107,7 +83,7 @@ def archiving_v8logs(file_name):
 
 
 def start_mutations_on_clickhouse(date_border):
-    count_days = timedelta(days=int(count_of_days_in_clickhouse))
+    count_days = timedelta(days=int(settings.count_of_days_in_clickhouse))
     cleaning_border = date_border - count_days
 
     if len(str(cleaning_border.month)) == 1:
@@ -121,10 +97,10 @@ def start_mutations_on_clickhouse(date_border):
         day = cleaning_border.day
 
     cleaning_border_str = f'{cleaning_border.year}{month}{day}230000'
-    headers = {'X-ClickHouse-User': f'{clickhouse_user}',
-               'X-ClickHouse-Key': f'{clickhouse_pwd}'}
-    sql = f"alter table v8logs.EventLogItems DELETE WHERE FileName < '{cleaning_border_str}.lgp'"
-    result = requests.request('POST', f'{clickhouse_url}', headers=headers, data=sql)
+    headers = {'X-ClickHouse-User': f'{settings.clickhouse_user}',
+               'X-ClickHouse-Key': f'{settings.clickhouse_pwd}'}
+    sql = f"alter table {settings.database_name}.EventLogItems DELETE WHERE FileName < '{cleaning_border_str}.lgp'"
+    result = requests.request('POST', f'{settings.clickhouse_url}', headers=headers, data=sql)
     if result.status_code == 200:
         logging('Mutation on deleting data in clickhouse started.')
 
@@ -133,7 +109,7 @@ def start_mutations_on_clickhouse(date_border):
     try:
         for table in LOGS_TABLES.tables:
             sql = f"alter table {table} delete where event_date < '{date_event}'"
-            result = requests.request('POST', f'{clickhouse_url}', headers=headers, data=sql)
+            result = requests.request('POST', f'{settings.clickhouse_url}', headers=headers, data=sql)
             if result.status_code != 200:
                 logging(f'Mutation for table [{table}] not started. Response code = {result.status_code}')
         logging('Success')
@@ -146,10 +122,10 @@ if __name__ == '__main__':
 
     logging('Start iteration.\nGet request.')
 
-    data = requests.request('GET',
-                            f'{clickhouse_url}/?user={clickhouse_user}&password={clickhouse_pwd}&query=select+max(FileName)+from+v8logs.EventLogItems')
-
-    # data = Test()
+    headers = {'X-ClickHouse-User': f'{settings.clickhouse_user}',
+               'X-ClickHouse-Key': f'{settings.clickhouse_pwd}'}
+    sql = f"select max(FileName) from {settings.database_name}.EventLogItems"
+    data = requests.request('POST', f'{settings.clickhouse_url}', headers=headers, data=sql)
 
     status_code = data.status_code
 
@@ -160,7 +136,7 @@ if __name__ == '__main__':
         logging(f'Border file: [{date_border}].\nTrying to archiving earlier files')
         # lgp lgx
         mas_delete = []
-        for file_name in os.listdir(f'{path_to_v8Logs}'):
+        for file_name in os.listdir(f'{settings.path_to_v8logs}'):
             if file_name[-3:] != 'lgp':
                 continue
             date = date_serialization(file_name)
@@ -178,7 +154,7 @@ if __name__ == '__main__':
             logging('All files successfully deleted.')
         else:
             logging('Files earlier than border not finded.')
-        if count_of_days_in_clickhouse:
+        if settings.count_of_days_in_clickhouse:
             start_mutations_on_clickhouse(date_border)
     else:
         logging('Abort. Status != 200')
